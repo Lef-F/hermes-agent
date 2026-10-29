@@ -238,6 +238,50 @@ class TestExtractCwdFromOutput:
         assert env.cwd == "/home/user"
         assert marker not in result["output"]
 
+    def test_spill_file_is_exact_command_stdout(self, tmp_path):
+        """The spill of a large ``--json`` run must parse: the wrapper's pipe-status and
+        CWD trailers are teed into it raw and have to be removed there too."""
+        import json
+
+        env = _TestableEnv()
+        payload = json.dumps([{"row": i, "pad": "x" * 50} for i in range(2000)])
+        trailer = f"\n{env._pipe_marker}0{env._pipe_marker}\n" if env._pipe_marker else ""
+        trailer += f"\n{env._cwd_marker}/new/cwd{env._cwd_marker}\n"
+        spill = tmp_path / "out.log"
+        spill.write_text(payload + "\n" + trailer)
+        result = {"output": "head ... tail" + trailer, "returncode": 0,
+                  "output_total_chars": len(payload), "full_output_path": str(spill)}
+
+        env._extract_cwd_from_output(result)
+
+        assert result["cwd"] == "/new/cwd"
+        assert result["full_output_path"] == str(spill)
+        assert spill.read_text() == payload + "\n"
+        assert len(json.loads(spill.read_text())) == 2000
+
+    def test_spill_cleanup_failure_drops_handle_keeps_result(self, tmp_path, monkeypatch):
+        from tools import spill_safety
+
+        def _fail(*_args, **_kwargs):
+            raise OSError("disk failed")
+
+        env = _TestableEnv()
+        marker = env._cwd_marker
+        spill = tmp_path / "out.log"
+        spill.write_text(f"full output\n{marker}/new/cwd{marker}\n")
+        result = {"output": f"visible output\n{marker}/new/cwd{marker}\n", "returncode": 7,
+                  "output_total_chars": 10_000, "full_output_path": str(spill)}
+        monkeypatch.setattr(spill_safety, "write_text_exclusive", _fail)
+
+        env._extract_cwd_from_output(result)
+
+        assert result["output"] == "visible output"
+        assert result["returncode"] == 7
+        assert result["cwd"] == "/new/cwd"
+        assert "full_output_path" not in result
+        assert "output_total_chars" not in result
+        assert not spill.exists()
+
 
 
 
