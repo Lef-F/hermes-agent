@@ -787,8 +787,25 @@ class TestBrowserExec:
         result = json.loads(bu_cli.browser_exec('print("hi")'))
         assert result["success"] is True
         assert result["exit_code"] == 0
-        assert 'got:print("hi")' in result["output"]
+        assert result["output"].startswith("got:")
+        assert 'print("hi")' in result["output"]
         assert "session" not in result
+
+    def test_workspace_is_a_python_name_in_code(self, tmp_path, monkeypatch):
+        """The description names `workspace`; models use it as a variable (NameError regression)."""
+        import sys
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        monkeypatch.setenv("BH_AGENT_WORKSPACE", str(ws))
+        cli = _fake_cli(tmp_path, f'exec "{sys.executable}" -I -\n')
+        monkeypatch.setattr(bu_cli, "_find_cli", lambda: [cli])
+        code = "# Saving rows\nopen(f'{workspace}/rows.json', 'w').write('[1]')\nprint(workspace)"
+        result = json.loads(bu_cli.browser_exec(code))
+        assert result["success"] is True, result
+        assert result["workspace"] == str(ws)
+        assert str(ws) in result["output"]
+        assert (ws / "rows.json").read_text() == "[1]"
 
     def test_session_sets_bu_name(self, tmp_path, monkeypatch):
         cli = _fake_cli(tmp_path, 'cat > /dev/null\necho "bu:$BU_NAME"\n')

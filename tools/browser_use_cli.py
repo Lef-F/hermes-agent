@@ -50,6 +50,13 @@ _LOCAL_FALLBACK_SENTINEL = "_HERMES_BU_LOCAL_FALLBACK"
 # Where new/hidden tabs may be brought to the front: a browser_use_shot.ACTIVATE_* mode. Popped before launch.
 _CLOUD_BROWSER_SENTINEL = "_HERMES_BU_CLOUD_BROWSER"
 
+# Prepended to every call that has a workspace (one line, so tracebacks shift by one). Models read
+# "`workspace` in every result" as a Python name and hit NameError; define it so
+# `open(f"{workspace}/rows.json", "a")` works as written.
+_WORKSPACE_PREAMBLE = (
+    "import os as _hermes_os; workspace = _hermes_os.environ.get('BH_AGENT_WORKSPACE', ''); del _hermes_os\n"
+)
+
 # Prepended to the model's code for named sessions on SHARED browsers (a /browser connect CDP override): the
 # harness daemon attaches to the first existing page at startup, so two fresh named daemons can land on the
 # SAME tab. Steering each onto a tab it created prevents clobbering. Runs once per daemon (marker keyed by
@@ -738,6 +745,7 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     workspace = _workspace_dir(task_id)
     if workspace:
         env["BH_AGENT_WORKSPACE"] = workspace
+        code = _WORKSPACE_PREAMBLE + code
 
     # BU_AUTOSPAWN makes the CLI start a Browser Use cloud browser when no local
     # Chrome/CDP endpoint is reachable (their API key authenticates it)
@@ -807,7 +815,8 @@ _HEADER_BASE = (
     "comment describing the step for the user in plain language, max 60 chars "
     "(e.g. `# Searching Amazon for paper towels`) — the UI shows it as the step label.\n\n"
     "STATE: the browser session and workspace persist across calls; Python variables do NOT (fresh "
-    "interpreter each call). The workspace dir is $BH_AGENT_WORKSPACE (also `workspace` in every result); "
+    "interpreter each call). The workspace dir is the `workspace` variable in your code (a str path; also "
+    "$BH_AGENT_WORKSPACE and `workspace` in every result); "
     "functions defined in agent_helpers.py there are auto-imported into every call. For multi-item tasks "
     "('all N products / every entry'), append each batch to a JSON/CSV file in the workspace, then read it "
     "back and aggregate in code — dedupe/count/sort with Python, not in your head — and verify the "
