@@ -37,6 +37,7 @@ from agent.auxiliary_error_shapes import (
     _botocore_error, _exc_http_status, _is_invalid_aux_response_error, _is_statusless_structured_provider_error,
 )
 from agent.auxiliary_managed_local import _is_managed_local_endpoint
+from agent.auxiliary_key_rotation import request_api_key, request_key_tagged
 from agent.auxiliary_reasoning_floor import remember_reasoning_floor, with_reasoning_floor
 from agent.auxiliary_structured_output import _route_key, _without_structured_output_format, remember_structured_output_rejection
 from agent.codex_headers import (
@@ -3764,9 +3765,10 @@ def _retry_same_provider_sync(*, resolved_provider: str, resolved_api_mode: Opti
     retry_client, retry_kwargs = _prepare_same_provider_retry(
         task=task, resolved_provider=resolved_provider, resolved_api_mode=resolved_api_mode, async_mode=False, **prep,
     )
-    return _validate_llm_response(
-        _relay_sync_completion(retry_client, retry_kwargs, provider=resolved_provider, api_mode=resolved_api_mode), task,
-    )
+    with request_key_tagged(retry_client):
+        return _validate_llm_response(
+            _relay_sync_completion(retry_client, retry_kwargs, provider=resolved_provider, api_mode=resolved_api_mode),
+            task)
 
 
 async def _retry_same_provider_async(*, resolved_provider: str, resolved_api_mode: Optional[str], task: Optional[str], **prep) -> Any:
@@ -3774,11 +3776,9 @@ async def _retry_same_provider_async(*, resolved_provider: str, resolved_api_mod
     retry_client, retry_kwargs = _prepare_same_provider_retry(
         task=task, resolved_provider=resolved_provider, resolved_api_mode=resolved_api_mode, async_mode=True, **prep,
     )
-    return await asyncio.to_thread(
-        _validate_llm_response,
-        await _relay_async_completion(retry_client, retry_kwargs, provider=resolved_provider, api_mode=resolved_api_mode),
-        task,
-    )
+    with request_key_tagged(retry_client):
+        return await asyncio.to_thread(_validate_llm_response, await _relay_async_completion(
+            retry_client, retry_kwargs, provider=resolved_provider, api_mode=resolved_api_mode), task)
 
 
 def _creds_have_api_key(creds: dict[str, Any]) -> bool:
@@ -7745,11 +7745,11 @@ def _ladder_credential_rungs(
                 return (yield _LadderStep(
                     "retry_same_provider", (resolved_provider, route.resolved_model))), None
             except Exception as retry2_err:
-                # Rotated key also hit a wall: mark it now so concurrent processes skip it,
-                # then fall through to the provider fallback.
+                # Retry also hit a wall: charge the key that SENT it (it may still be the old one),
+                # so concurrent processes skip it, then fall through to the provider fallback.
                 if (_is_payment_error(retry2_err) or _is_auth_error(retry2_err)
                         or _is_rate_limit_error(retry2_err)):
-                    _recover_provider_pool(pool_provider, retry2_err)
+                    _recover_provider_pool(pool_provider, retry2_err, failed_api_key=request_api_key(retry2_err))
                     first_err = retry2_err
                 else:
                     raise
