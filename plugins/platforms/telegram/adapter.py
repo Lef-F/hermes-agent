@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 from agent.deadline import run_bounded_async
 from agent.ssl_verify import platform_ssl_context
+from gateway.platforms.base_send_path import schedule_send_path_redelivery
 from gateway.platforms._shared import (
     decode_json_list_literal as _decode_json_list_literal,
     extra_or_secret as _extra_or_secret, get_scoped_secret as _get_scoped_secret,
@@ -1717,9 +1718,8 @@ class TelegramAdapter(TelegramHeldInboundMixin, TelegramTopicRoutingMixin, BaseP
         # published "retrying" (degraded connect, reconnect stamp, or the
         # mid-session recovery below) back to "connected" (#101391).
         if self._send_path_degraded and getattr(self, "_running", False) and not self.has_fatal_error:
-            self._write_runtime_status_safe(
-                "connected", platform_state="connected", error_code=None, error_message=None,
-            )
+            self._write_runtime_status_safe("connected", platform_state="connected", error_code=None, error_message=None)
+            schedule_send_path_redelivery(self)  # replay sends refused as send_path_degraded while down
         self._send_path_degraded = False
         return True
 
