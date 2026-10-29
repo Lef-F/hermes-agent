@@ -1360,12 +1360,12 @@ def _live_send_text(
         target_errors.append(msg)
         return False, False, None
     if send_raw_response and t.thread_id and send_raw_response.get("thread_fallback"):
+        # Delivered, just not in the topic (it was deleted): a warning, not a delivery error, or
+        # every run is booked delivery_failed and its failure alert loses alerted_at.
         requested_thread_id = send_raw_response.get("requested_thread_id") or t.thread_id
-        _note_target_error(
-            job,
-            f"configured thread_id {requested_thread_id} for "
-            f"{t.where} was not found; delivered without thread_id",
-            delivery_errors)
+        logger.warning(
+            "Job '%s': configured thread_id %s for %s was not found; delivered without thread_id "
+            "(update the job's deliver target)", job["id"], requested_thread_id, t.where)
     return True, False, delivered_message_id
 
 

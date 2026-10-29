@@ -203,6 +203,23 @@ class TestFilteredResultIsNotDelivered:
         assert "via live adapter" in caplog.text
 
 
+class TestDeletedTopicFallback:
+    """Telegram retries without ``message_thread_id`` when the topic is gone; the message arrives,
+    so the run is delivered (a warning, not ``delivery_failed`` every week)."""
+
+    def test_thread_fallback_is_a_warning_not_a_delivery_error(self, caplog):
+        result = _SendResult(message_id=20708, raw_response={
+            "message_ids": [20708], "requested_thread_id": "10781", "thread_fallback": True})
+        with caplog.at_level(logging.WARNING, logger="cron.scheduler"):
+            error, router_calls, standalone_calls = _run(_job(thread_id="10781"), "Weekly triage.", result)
+
+        assert error is None
+        assert len(router_calls) == 1
+        assert standalone_calls == []  # delivered on the live lane; no duplicate
+        assert "thread_id 10781" in caplog.text
+        assert "delivered without thread_id" in caplog.text
+
+
 class TestEmptyPayloadFailsClosed:
 
     def test_empty_payload_never_reaches_the_standalone_sender(self, caplog):
