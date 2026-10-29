@@ -1721,4 +1721,7 @@ registry.register(
     check_fn=check_terminal_requirements,
     emoji="💻",
     max_result_size_chars=100_000,
+    # The generic sequential deadline (420s) must not kill a foreground call the schema allows
+    # up to FOREGROUND_MAX_TIMEOUT; the slack covers env setup and output finalization.
+    execution_timeout=FOREGROUND_MAX_TIMEOUT + 30,
 )
