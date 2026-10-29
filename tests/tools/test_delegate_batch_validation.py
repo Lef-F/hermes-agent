@@ -122,6 +122,20 @@ class TestBatchPlaceholderGoals(unittest.TestCase):
                 result = _call([{"goal": GOOD_A}, {"goal": bad_free_goal}])
             self.assertNotIn("error", result, bad_free_goal)
 
+    def test_compose_environment_interpolation_accepted(self):
+        compose_goal = (
+            "Configure Caddy with ${CADDY_DOMAIN} and bind services to ${HOST_IP}"
+        )
+        with patch("tools.delegate_tool._run_single_child") as mock_run:
+            mock_run.side_effect = [
+                {"task_index": 0, "status": "completed", "summary": "ok",
+                 "api_calls": 1, "duration_seconds": 1.0, "_child_role": None},
+                {"task_index": 1, "status": "completed", "summary": "ok",
+                 "api_calls": 1, "duration_seconds": 1.0, "_child_role": None},
+            ]
+            result = _call([{"goal": GOOD_A}, {"goal": compose_goal}])
+        self.assertNotIn("error", result)
+
     def test_multiword_placeholder_shapes_still_rejected(self):
         for marker_goal in (
             "Deploy the service to <target environment> when ready",

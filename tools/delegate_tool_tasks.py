@@ -8,13 +8,14 @@ from typing import Any, Dict, List, Optional
 
 # Placeholder shapes for batch goal validation: bare 'TODO' / 'task N' labels, or unexpanded template markers. The
 # marker regex is deliberately NARROW — only snake_case / space-separated placeholder identifiers (`<feature_name>`,
-# `{file path}`, `<FEATURE-NAME>`), the shape LLM templates leave behind. Bare single-word brackets must never be
-# rejected: legitimate goals are full of generics (`Vec<T>`), HTML tags (`<div>`), dict snippets (`{"key": 1}`), glob
-# braces (`{a,b}`) and f-string style (`{i}`).
+# `{file path}`, `<FEATURE-NAME>`), the shape LLM templates leave behind. Dollar-prefixed braces are Compose/shell
+# interpolation (`${HOST_IP}`), not agent template markers. Bare single-word brackets must never be rejected: legitimate
+# goals are full of generics (`Vec<T>`), HTML tags (`<div>`), dict snippets (`{"key": 1}`), glob braces (`{a,b}`) and
+# f-string style (`{i}`).
 # See #81141.
 _PLACEHOLDER_GOAL_RE = re.compile(r"^(todo|task\s*\d+)$", re.IGNORECASE)
 _TEMPLATE_MARKER_RE = re.compile(
-    r"<[A-Za-z][A-Za-z0-9]*(?:[ _-][A-Za-z0-9]+)+>|\{[A-Za-z][A-Za-z0-9]*(?:[ _-][A-Za-z0-9]+)+\}"
+    r"<[A-Za-z][A-Za-z0-9]*(?:[ _-][A-Za-z0-9]+)+>|(?<!\$)\{[A-Za-z][A-Za-z0-9]*(?:[ _-][A-Za-z0-9]+)+\}"
 )
 _MIN_BATCH_GOAL_LEN = 10
 
