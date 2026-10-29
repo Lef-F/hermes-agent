@@ -371,6 +371,8 @@ DANGEROUS_PATTERNS = [
      "dynamic shell word may expand to arbitrary program execution flag"),
     # Gateway lifecycle: stopping/restarting the gateway kills all running agents. Global flags
     # between `hermes` and `gateway` (`hermes -p ade gateway restart`) are allowed so a profile flag can't slip past.
+    # These and the self-termination rules below only count a match whose first token is unquoted
+    # (_UNQUOTED_VERB_DANGEROUS_DESCRIPTIONS), so prose like `grep -n "hermes gateway restart" notes.md` passes.
     (r'\bhermes\s+' + _GLOBAL_FLAGS + r'gateway\s+(stop|restart)\b', "stop/restart hermes gateway (kills running agents)"),
     (r'\bhermes\s+update\b', "hermes update (restarts gateway, kills running agents)"),
     # Docker/Podman daemon redirect — global flags or env that point the CLI at a DIFFERENT (often remote) daemon:
@@ -489,6 +491,21 @@ _QUOTE_MASKED_DANGEROUS_DESCRIPTIONS = frozenset({
     "find dynamic shell word may expand to destructive flag",
     "dynamic shell word may expand to arbitrary program execution flag",
 })
+# Gateway-lifecycle and self-termination rules: positionless on purpose (wrappers like `uv run`, `xargs`,
+# `nice` and path-qualified binaries must still match), so _CMDPOS anchoring would lose real commands. Instead
+# a match counts only when its FIRST token is outside quotes: `grep -n "hermes gateway restart" notes.md` and
+# `rg "pkill hermes" docs/` are data, while `pkill -f "hermes gateway"` (verb unquoted, target quoted) still
+# matches. Under shell carriers (sh -c, eval, source) quoted text is code, so the raw match stands (#93392).
+_UNQUOTED_VERB_DANGEROUS_DESCRIPTIONS = frozenset({
+    "stop/restart hermes gateway (kills running agents)",
+    "hermes update (restarts gateway, kills running agents)",
+    "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')",
+    "kill hermes/gateway process (self-termination)",
+    "kill process via pgrep/pidof expansion (self-termination)",
+    "kill process via backtick pgrep/pidof expansion (self-termination)",
+})
+# Bound on quoted false starts skipped per rule; past it the match is kept (fail closed).
+_UNQUOTED_VERB_MAX_SKIPS = 64
 
 # Preserve approvals stored under the removed interpreter regex rules.
 _REMOVED_PATTERN_KEY_ALIASES = {
@@ -1539,10 +1556,31 @@ def _is_shell_token_spliced_gateway_lifecycle(command: str) -> bool:
     launchctl pattern above. See #80269.
     """
     try:
-        from cron.lifecycle_guard import contains_gateway_lifecycle_command
+        from cron.lifecycle_guard import _lifecycle_command_scan_with_data_exemption
     except Exception:
         return False
-    return contains_gateway_lifecycle_command(command)
+    # Same data-sink exemption the guard's own hard block applies: a grep/rg/journalctl pattern
+    # (`grep -n "hermes gateway restart" notes.md`) is data, not a command.
+    return _lifecycle_command_scan_with_data_exemption(command)
+
+
+def _match_starts_unquoted(pattern_re, command_lower: str, masked_lower: str, command_variant: str) -> bool:
+    """Whether *pattern_re* matches *command_lower* at a position the shell sees as unquoted.
+    ``_mask_quoted_prose`` blanks quoted content in place, so a match whose first character is blank
+    in *masked_lower* began inside quotes. Fails closed (raw match) when the two strings are not
+    position-aligned, under a shell carrier, or after ``_UNQUOTED_VERB_MAX_SKIPS`` quoted starts."""
+    match = pattern_re.search(command_lower)
+    if match is None:
+        return False
+    if len(masked_lower) != len(command_lower) or _contains_shell_carrier(command_variant):
+        return True
+    for _ in range(_UNQUOTED_VERB_MAX_SKIPS):
+        if not masked_lower[match.start()].isspace():
+            return True
+        match = pattern_re.search(command_lower, match.start() + 1)
+        if match is None:
+            return False
+    return True
 
 
 def detect_dangerous_command(command: str) -> tuple:
@@ -1561,6 +1599,13 @@ def detect_dangerous_command(command: str) -> tuple:
                         _mask_quoted_prose(command_variant)
                     )
                 if pattern_re.search(masked_lower):
+                    return (True, description, description)
+            elif description in _UNQUOTED_VERB_DANGEROUS_DESCRIPTIONS:
+                if masked_lower is None:
+                    masked_lower = _lower_preserving_flags(
+                        _mask_quoted_prose(command_variant)
+                    )
+                if _match_starts_unquoted(pattern_re, command_lower, masked_lower, command_variant):
                     return (True, description, description)
             elif pattern_re.search(command_lower):
                 return (True, description, description)
