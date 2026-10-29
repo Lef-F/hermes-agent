@@ -285,6 +285,20 @@ class TestRejectEmptyContent:
         assert items[0]["content"] == "Keep this"
         assert items[0]["status"] == "completed"
 
+    def test_schema_admits_status_only_merge_and_runtime_still_guards_new_ids(self):
+        """todo_list is deferred, so the tool_call bridge validates against the schema: a
+        `{id, status}` merge must pass it, while a new id without content still fails."""
+        from tools.tool_search_validation import validate_deferred_call_args
+        from tools.todo_tool import TODO_SCHEMA
+
+        assert validate_deferred_call_args(TODO_SCHEMA["name"], {
+            "todos": [{"id": "1", "status": "completed"}], "merge": True}) is None
+        store = TodoStore()
+        store.write([{"id": "1", "content": "Keep this", "status": "pending"}])
+        result = json.loads(todo_tool(todos=[{"id": "2", "status": "pending"}], merge=True, store=store))
+        assert "empty or missing content" in result["error"]
+        assert store.read() == [{"id": "1", "content": "Keep this", "status": "pending"}]
+
     def test_valid_content_still_works(self):
         """Regression: valid items still pass through normally."""
         store = TodoStore()

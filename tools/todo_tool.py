@@ -255,7 +255,7 @@ TODO_SCHEMA = {
                         },
                         "content": {
                             "type": "string",
-                            "description": "Task description"
+                            "description": "Task description. Required for new items; omit to keep it on a merge update."
                         },
                         "status": {
                             "type": "string",
@@ -266,7 +266,9 @@ TODO_SCHEMA = {
                             "description": "Optional id of another item, making this a nested subtask. Omit for top-level."
                         }
                     },
-                    "required": ["id", "content", "status"]
+                    # Only id: a merge may update just {id, status}. New items without content are
+                    # rejected at runtime (TodoStore._validate).
+                    "required": ["id"]
                 }
             },
             "merge": {
