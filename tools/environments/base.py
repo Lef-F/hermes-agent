@@ -22,7 +22,7 @@ from typing import Callable, Iterable
 from hermes_constants import get_hermes_home
 from tools.interrupt import consume_yield, is_interrupted, is_thread_interrupted
 from tools.environments.base_output import (
-    ProcessHandle, _finalize_wait_result, _new_output_collector, _start_drain_thread,
+    ProcessHandle, _finalize_wait_result, _new_output_collector, _start_drain_thread, _strip_spill_markers,
 )
 from tools.environments.base_session_env import (
     _SHELL_ENV_NAME_RE, _SNAP_TMP_SUFFIX, _cwd_marker, _pipe_marker, _snapshot_bootstrap_script, _split_cwd_marker,
@@ -633,6 +633,7 @@ class BaseEnvironment(ABC):
         only when THIS command emitted a marker: a killed/timed-out command emits none and
         ``self.cwd`` keeps the previous value. The environment is shared across sessions, so
         concurrent callers must read ``result["cwd"]`` rather than ``self.cwd``."""
+        _strip_spill_markers(result, (self._pipe_marker, self._cwd_marker))
         pipe_split = _split_cwd_marker(result.get("output", ""), self._pipe_marker) if self._pipe_marker else None
         if pipe_split is not None:
             statuses, cleaned = pipe_split

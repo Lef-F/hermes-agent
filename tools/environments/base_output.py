@@ -6,15 +6,18 @@ stdout drain thread used by ``BaseEnvironment._wait_for_process``.
 """
 
 import codecs
+import contextlib
+import logging
 import os
 import subprocess
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import IO, Callable, Protocol
+from typing import IO, Callable, Iterable, Protocol
 
 from hermes_constants import get_hermes_home
+from tools.environments.base_session_env import _split_cwd_marker
 from tools.environments.fd_wait import open_fd_waiter
 from tools.tool_output_truncate import head_tail_split, truncation_notice
 from hermes_cli._subprocess_compat import windows_hide_flags
@@ -24,6 +27,8 @@ from hermes_cli._subprocess_compat import windows_hide_flags
 _UNBOUNDED_CAPTURE_CHARS = 2**63 - 1
 
 _SPILL_MAX_AGE_S = 7 * 86400
+
+logger = logging.getLogger(__name__)
 
 
 class _BoundedOutputCollector:
@@ -204,6 +209,32 @@ def _finalize_wait_result(collector: _BoundedOutputCollector, rendered: str, ret
         result["output_total_chars"] = collector.total_chars
         result["full_output_path"] = spill
     return result
+
+
+def _strip_spill_markers(result: dict, markers: Iterable[str]) -> None:
+    """Remove the wrapper's marker lines from the spill file so it holds only the command's
+    stdout (a ``--json`` CLI's spill must parse). The collector tees the raw stream, trailer
+    included; ``_extract_cwd_from_output`` cleans only ``result["output"]``. On I/O failure
+    the handle is dropped (and the file removed) rather than pointing at a marked-up copy."""
+    path = result.get("full_output_path")
+    if not path:
+        return
+    spill = Path(path)
+    try:
+        text = original = spill.read_text(encoding="utf-8-sig", errors="replace")
+        for marker in markers:
+            split = _split_cwd_marker(text, marker) if marker else None
+            if split is not None:
+                text = split[1]
+        if text != original:
+            from tools.spill_safety import write_text_exclusive
+            write_text_exclusive(spill, text, private=True, overwrite=True, errors="replace")
+    except OSError:
+        logger.debug("spill marker cleanup failed; dropping spill handle", exc_info=True)
+        result.pop("full_output_path", None)
+        result.pop("output_total_chars", None)
+        with contextlib.suppress(OSError):
+            spill.unlink()
 
 
 # --- Stdin / spawn helpers ---
